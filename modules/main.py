@@ -3,6 +3,7 @@ import os
 import struct
 import subprocess
 import sys
+import threading
 import time
 
 from argparse import ArgumentParser
@@ -30,6 +31,7 @@ def switch_boot0(dev, unbrick = False):
         if block[0:9] != b"EMMC_BOOT":
             dev.reboot()
             raise RuntimeError("what's wrong with your BOOT0?")
+    dev.kick_watchdog()
 
 def calculate_time_left(time_passed, done, left):
     time_left = int(((left - done - 1) * time_passed / (done + 1)).total_seconds())
@@ -60,6 +62,8 @@ def flash_data(dev, data, start_block, max_size=0):
                                                                        calculate_time_left(time_passed, x, blocks), \
                                                                        str(time_passed)[:-7]), end='\r')
         dev.emmc_write(start_block + x, data[x * 0x200:(x + 1) * 0x200])
+        if x % 10 == 0:
+            dev.kick_watchdog()
     print("")
 
 def read_file(path):
@@ -82,6 +86,8 @@ def dump_binary(dev, path, start_block, max_size=0):
                                                                            calculate_time_left(time_passed, x, blocks), \
                                                                            str(time_passed)[:-7]), end='\r')
             fout.write(dev.emmc_read(start_block + x))
+            if x % 10 == 0:
+                dev.kick_watchdog()
     print("")
 
 def switch_user(dev, partitiontable = False):
@@ -91,6 +97,7 @@ def switch_user(dev, partitiontable = False):
         if block[510:512] != b"\x55\xAA":
             dev.reboot()
             raise RuntimeError("what's wrong with your GPT? try to flash partition table")
+    dev.kick_watchdog()
 
 def parse_gpt(dev):
     data = dev.emmc_read(0x400 // 0x200) + dev.emmc_read(0x600 // 0x200) \
@@ -105,6 +112,17 @@ def parse_gpt(dev):
         part_end = struct.unpack("<Q", part[0x28:0x30])[0]
         parts[part_name] = (part_start, part_end - part_start + 1)
     return parts
+
+class UserInputThread(threading.Thread):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.done = False
+
+    def run(self):
+        log("Hold volume down button and press enter")
+        log("Don't release volume button until you see FASTBOOT mode... on phone screen")
+        input()
+        self.done = True
 
 def main():
     parser = ArgumentParser()
@@ -131,6 +149,7 @@ def main():
 
     # Load brom payload
     load_payload(dev, "../brom-payload/build/payload.bin")
+    dev.kick_watchdog()
 
     # Partition table
     if args.partitiontable:
@@ -203,9 +222,11 @@ def main():
 
     # Reboot
     if args.unlock:
-        log("Hold volume down button and press enter")
-        log("Don't release volume button until you see FASTBOOT mode... on phone screen")
-        input()
+        thread = UserInputThread()
+        thread.start()
+        while not thread.done:
+            dev.write32(0x10212008, 0x1971) # low-level watchdog kick
+            time.sleep(1)
     log("Reboot")
     dev.reboot()
     if args.unlock:
