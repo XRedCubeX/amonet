@@ -4,6 +4,7 @@ import glob
 import time
 
 import serial
+import serial.tools.list_ports
 
 from logger import log
 
@@ -11,7 +12,7 @@ BAUD = 115200
 TIMEOUT = 5
 
 
-CRYPTO_BASE = 0x10210000 # for karnak
+CRYPTO_BASE = 0x10216000 # for mblu2
 
 
 def serial_ports ():
@@ -22,24 +23,25 @@ def serial_ports ():
         :returns:
             A set containing the serial ports available on the system
     """
-
-    if sys.platform.startswith("win"):
-        ports = [ "COM{0:d}".format(i + 1) for i in range(256) ]
-    elif sys.platform.startswith("linux"):
-        ports = glob.glob("/dev/ttyACM*")
-    elif sys.platform.startswith("darwin"):
-        ports = glob.glob("/dev/cu.usbmodem*")
-    else:
-        raise EnvironmentError("Unsupported platform")
+    vid="0E8D"
+    pid="0003"
 
     result = set()
+    ports = list(serial.tools.list_ports.comports())
     for port in ports:
-        try:
-            s = serial.Serial(port, timeout=TIMEOUT)
-            s.close()
-            result.add(port)
-        except (OSError, serial.SerialException):
-            pass
+        if hasattr(port, 'hwid'):
+            portHwid = port.hwid
+            portDevice = port.device
+        else:
+            portHwid = port[2]
+            portDevice = port[0]
+        if vid and pid in portHwid:
+            try:
+                s = serial.Serial(portDevice, timeout=TIMEOUT)
+                s.close()
+                result.add(portDevice)
+            except (OSError, serial.SerialException):
+                pass
 
     return result
 

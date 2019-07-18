@@ -8,6 +8,7 @@
 #include "sd.h"
 #include "sdio.h"
 #include "errno.h"
+#include "main.h"
 
 #define msdc_txfifocnt()   ((sdr_read32(MSDC_FIFOCS) & MSDC_FIFOCS_TXCNT) >> 16)
 #define msdc_rxfifocnt()   ((sdr_read32(MSDC_FIFOCS) & MSDC_FIFOCS_RXCNT) >> 0)
@@ -49,7 +50,7 @@ static void msdc_dump_info() {}
         while (retry) { \
             if (!(expr)) break; \
             if (cnt-- == 0) { \
-                retry--; mdelay(1); cnt = backup; \
+                retry--; sleepy(); cnt = backup; \
             } \
         } \
         if (retry == 0) { \

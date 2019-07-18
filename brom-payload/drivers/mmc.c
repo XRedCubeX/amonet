@@ -5,11 +5,30 @@
 #include "mmc.h"
 #include "errno.h"
 #include "mt_sd.h"
+#include "main.h"
+#include "../crypto/hmac-sha256.h"
 
 #define be32_to_cpup(addr) __builtin_bswap32(*(uint32_t*)addr)
 #define be16_to_cpup(addr) __builtin_bswap16(*(uint16_t*)addr)
 #define cpu_to_be16p be16_to_cpup
 #define cpu_to_be32p be32_to_cpup
+
+#define MSDC0_GPIO_PUPD0_G5_ADDR  (GPIO_REG_BASE + 0xD80)
+#define MSDC0_GPIO_PUPD1_G5_ADDR  (GPIO_REG_BASE + 0xD90)
+
+#define MSDC0_PUPD_DAT57_RSTB_MASK         (0x7777 << 0)
+#define MSDC0_PUPD_CMD_DSL_CLK_DAT04_MASK  (0x77777777 << 0)
+
+#define msdc_write32(addr, data)    mt_reg_sync_writel(data,addr)
+#define msdc_read32(addr)           (*(volatile uint32_t*)(addr))
+
+#define msdc_set_field(reg,field,val) \
+    do {    \
+        volatile uint32_t tv = msdc_read32(reg); \
+        tv &= ~(field); \
+        tv |= ((val) << (uffs(field) - 1)); \
+        msdc_write32(reg,tv); \
+    } while(0)
 
 unsigned int msdc_cmd(struct msdc_host *host, struct mmc_command *cmd);
 
@@ -778,110 +797,6 @@ int mmc_rpmb_read(struct msdc_host *host, void *buf) {
     return ret;
 }
 
-static void sej_init(int arg) {
-    int param = 0;
-    if ( arg )
-        param = 3;
-    else
-        param = 2;
-
-    sdr_write32(0x1000A020, 0);
-    sdr_write32(0x1000A024, 0);
-    sdr_write32(0x1000A028, 0);
-    sdr_write32(0x1000A02C, 0);
-    sdr_write32(0x1000A030, 0);
-    sdr_write32(0x1000A034, 0);
-    sdr_write32(0x1000A038, 0);
-    sdr_write32(0x1000A03C, 0);
-    sdr_write32(0x1000A004, 2);
-    sdr_write32(0x1000A00C, 272);
-    sdr_write32(0x1000A008, 2);
-    sdr_write32(0x1000A040, 0x9ED40400);
-    sdr_write32(0x1000A044, 0xE884A1);
-    sdr_write32(0x1000A048, 0xE3F083BD);
-    sdr_write32(0x1000A04C, 0x2F4E6D8A);
-
-    uint32_t magic[12] = { 
-        0x2D44BB70,
-        0xA744D227,
-        0xD0A9864B,
-        0x83FFC244,
-        0x7EC8266B,
-        0x43E80FB2,
-        0x1A6348A,
-        0x2067F9A0,
-        0x54536405,
-        0xD546A6B1,
-        0x1CC3EC3A,
-        0xDE377A83
-    };
-
-    for (int i = 0; i < 3; ++i) {
-        int pos = i * 4;
-        sdr_write32(0x1000A010, magic[pos]);
-        sdr_write32(0x1000A014, magic[pos + 1]);
-        sdr_write32(0x1000A018, magic[pos + 2]);
-        sdr_write32(0x1000A01C, magic[pos + 3]);
-        sdr_write32(0x1000A008, 1);
-        while ( !(sdr_read32(0x1000A008) & 0x8000) )
-          ;
-    }
-
-    sdr_write32(0x1000A008, 2);
-    sdr_write32(0x1000A040, 0x9ED40400);
-    sdr_write32(0x1000A044, 0xE884A1);
-    sdr_write32(0x1000A048, 0xE3F083BD);
-    sdr_write32(0x1000A04C, 0x2F4E6D8A);
-    sdr_write32(0x1000A004, param);
-    sdr_write32(0x1000A00C, 0);
-}
-
-static void sej_run(uint32_t *buf1, size_t len, char *buf2) {
-    char *i;
-    for ( i = buf2; i - buf2 < len; *(uint32_t *)(i - 4) = sdr_read32(0x1000A05C) )
-    {
-        sdr_write32(0x1000A010, buf1[0]);
-        sdr_write32(0x1000A014, buf1[1]);
-        sdr_write32(0x1000A018, buf1[2]);
-        sdr_write32(0x1000A01C, buf1[3]);
-        sdr_write32(0x1000A008, 1);
-        while ( !(sdr_read32(0x1000A008) & 0x8000) )
-          ;
-        buf1 += 4;
-        i += 16;
-        *(uint32_t *)(i - 16) = sdr_read32(0x1000A050);
-        *(uint32_t *)(i - 12) = sdr_read32(0x1000A054);
-        *(uint32_t *)(i - 8) = sdr_read32(0x1000A058);
-    }
-}
-
-static void sej_fini() {
-    sdr_write32(0x1000A008, 2);
-    sdr_write32(0x1000A020, 0);
-    sdr_write32(0x1000A024, 0);
-    sdr_write32(0x1000A028, 0);
-    sdr_write32(0x1000A02C, 0);
-    sdr_write32(0x1000A030, 0);
-    sdr_write32(0x1000A034, 0);
-    sdr_write32(0x1000A038, 0);
-    sdr_write32(0x1000A03C, 0);
-}
-
-static void sej_encrypt(void *buf, size_t len, void *buf2) {
-    // printf("orig:\n");
-    // hex_dump(buf, len);
-
-    // printf("sej init\n");
-    sej_init(1);
-    // printf("sej run\n");
-    sej_run(buf, len, buf2);
-    // printf("sej fini\n");
-    sej_fini();
-
-    // printf("result:\n");
-    // hex_dump(buf, len);
-}
-
 uint8_t rpmb_key[32];
 
 void rpmb_calc_mac(struct mmc_core_rpmb_req *rpmb_req) {
@@ -901,7 +816,6 @@ void rpmb_calc_mac(struct mmc_core_rpmb_req *rpmb_req) {
 
     printf("frame:\n");
     hex_dump(rpmb_req->frame, 0x200);
-    // sej_encrypt(req->mac, 32, req->mac);
 }
 
 int mmc_rpmb_write(struct msdc_host *host, void *buf) {
@@ -964,37 +878,14 @@ int mmc_rpmb_write(struct msdc_host *host, void *buf) {
     return ret;
 }
 
-static void derive_rpmb_key(uint8_t *in) {
-    printf("in:\n");
-    hex_dump(in, 16);
-    printf("\n");
-
-    uint8_t expand[32] = { 0 };
-    for (int i = 0; i < 32; ++i) {
-        expand[i] = in[i % 16];
-    }
-
-    printf("expand:\n");
-    hex_dump(expand, 32);
-    printf("\n");
-
-    sej_encrypt(expand, 32, expand);
-    printf("encrypted:\n");
-    hex_dump(expand, 32);
-    printf("\n");
-
-    byteswap(expand, 32);
-    printf("final:\n");
-    hex_dump(expand, 32);
-    printf("\n");
-
-    memcpy(rpmb_key, expand, 32);
-}
-
 int mmc_init(struct msdc_host *host) {
     int ret = 0;
 
     host->blksz = 0x200;
+
+    // power up msdc0
+    msdc_set_field(MSDC0_GPIO_PUPD0_G5_ADDR, MSDC0_PUPD_CMD_DSL_CLK_DAT04_MASK, 0x11111661);
+    msdc_set_field(MSDC0_GPIO_PUPD1_G5_ADDR, MSDC0_PUPD_DAT57_RSTB_MASK, 0x2111);
 
     sdr_set_bits(MSDC_CFG, MSDC_CFG_PIO);
     sleepy();
@@ -1019,11 +910,6 @@ int mmc_init(struct msdc_host *host) {
     uint32_t cid[4] = { 0 };
     ret = mmc_all_send_cid(host, cid);
     printf("ALL_SEND_CID = 0x%08X cid = 0x%08X 0x%08X 0x%08X 0x%08X\n", ret, cid[0], cid[1], cid[2], cid[3]);
-
-    uint32_t cid_be[4] = { 0 };
-    for (int i = 0; i < 4; ++i)
-        cid_be[i] = __builtin_bswap32(cid[i]);
-    derive_rpmb_key(cid_be);
 
     ret = mmc_set_relative_addr(host, 1);
     printf("SET_RELATIVE_ADDR = 0x%08X\n", ret);

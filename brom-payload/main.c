@@ -61,39 +61,23 @@ void sleepy(void) {
     for (volatile int i = 0; i < 0x80000; ++i) {}
 }
 
-#if 1
-void mdelay (unsigned long msec)
-{
-   sleepy();
-}
-
-/* delay usec useconds */
-void udelay (unsigned long usec)
-{
-   sleepy();
-}
-#endif
-
 int main() {
     char buf[0x200] = { 0 };
     int ret = 0;
 
-    int (*send_dword)() = (void*)0xC047;
-    int (*recv_dword)() = (void*)0xC013;
-    // addr, sz
-    int (*send_data)() = (void*)0xC10F;
-    // addr, sz, flags (=0)
-    int (*recv_data)() = (void*)0xC089;
+    int (*send_dword)() = (void*)0x9513;
+    int (*recv_dword)() = (void*)0x94DF;
+    int (*send_data)() = (void*)0x95DB;
+    int (*recv_data)() = (void*)0x9555;
 
     // Restore the pointer we overwrote
-    uint32_t *ptr_send = (void*)0x1028A8;
-    *ptr_send = 0x5FE5;
+    uint32_t *ptr_send = (void*)0x1027A0;
+    *ptr_send = 0x3509;
 
     printf("Entered the payload\n");
 
     struct msdc_host host = { 0 };
     host.ocr_avail = MSDC_OCR_AVAIL;
-
     mmc_init(&host);
 
     printf("Entering command loop\n");
@@ -139,7 +123,7 @@ int main() {
             printf("Switch to partition %d => ", part);
             ret = mmc_set_part(&host, part);
             printf("0x%08X\n", ret);
-            mdelay(500); // just in case
+            sleepy(); //mdelay(500); // just in case
             break;
         }
         case 0x2000: {
@@ -156,7 +140,7 @@ int main() {
         }
         case 0x3000: {
             printf("Reboot\n");
-            volatile uint32_t *reg = (volatile uint32_t *)0x10007000;
+            volatile uint32_t *reg = (volatile uint32_t *)0x10212000;
             reg[8/4] = 0x1971;
             reg[0/4] = 0x22000014;
             reg[0x14/4] = 0x1209;
