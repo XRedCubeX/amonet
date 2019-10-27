@@ -502,6 +502,7 @@ out:
 static int mmc_rpmb_request_check(struct msdc_host *host,
         struct mmc_ioc_rpmb_req *p_req)
 {
+    (void)host;
     /*
      * Some parameters are a must for the operation. Different
      * operation expect different paramters. Below code is
@@ -711,7 +712,7 @@ int mmc_rpmb_get_write_count(struct msdc_host *host, uint32_t *wc) {
     struct mmc_ioc_rpmb_req req = { 0 };
     int ret = 0;
     uint16_t result = 0;
-    char nonce[32] = { 0 };
+    uint8_t nonce[32] = { 0 };
     req.type = RPMB_GET_WRITE_COUNTER;
     req.wc = wc;
     req.result = &result;
@@ -759,7 +760,7 @@ int mmc_rpmb_read(struct msdc_host *host, void *buf) {
     struct mmc_ioc_rpmb_req req = { 0 };
     int ret = 0;
     uint16_t result = 0;
-    char nonce[32] = { 0 };
+    uint8_t nonce[32] = { 0 };
     req.type = RPMB_READ_DATA;
     req.blk_cnt = 1;
     req.result = &result;
@@ -823,8 +824,8 @@ int mmc_rpmb_write(struct msdc_host *host, void *buf) {
     struct mmc_ioc_rpmb_req req = { 0 };
     int ret = 0;
     uint16_t result = 0;
-    char nonce[32] = { 0 };
-    char mac[32] = { 0 };
+    uint8_t nonce[32] = { 0 };
+    uint8_t mac[32] = { 0 };
     uint32_t wc;
 
     uint8_t tmp[0x100];

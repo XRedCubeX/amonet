@@ -1,5 +1,7 @@
-__pycache__
-*.pyc
-build
 *.log
+*.pyc
+__pycache__
+backup
 bin
+build
+dumps

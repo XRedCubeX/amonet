@@ -1,4 +1,5 @@
 import datetime
+import easygui as eg
 import os
 import struct
 import subprocess
@@ -126,14 +127,20 @@ class UserInputThread(threading.Thread):
 
 def main():
     parser = ArgumentParser()
+    parser.add_argument("-b", "--backupemmc", action='store_true', dest='backupemmc', default=False,
+                        help="backup selected emmc partitions to dumps folder")
+    parser.add_argument("-d", "--dumpbootrom", action='store_true', dest='dumpbootrom', default=False,
+                        help="dump device bootrom to dumps folder")
     parser.add_argument("-l", "--unlock", action='store_true', dest='unlock', default=False,
                         help="patch frp and flash flyme4 lk to allow bootloader unlock")
     parser.add_argument("-m", "--ignoremodem", action='store_true', dest='ignoremodem', default=False,
                         help="ignore ModemManager checking")
-    parser.add_argument("-p", "--partitiontable", action='store_true', dest='partitiontable', default=False,
-                        help="flash stock partition table to emmc")
-    parser.add_argument("-t", "--testrw", action='store_true', dest='testrw', default=False,
-                        help="dump, flash boot partition and read rpmb")
+    parser.add_argument("-p", "--parttablebackup", action='store_true', dest='parttablebackup',
+                        default=False, help="backup partition table to dumps folder")
+    parser.add_argument("-r", "--restoreemmc", action='store_true', dest='restoreemmc', default=False,
+                        help="restore selected emmc partitions from dumps folder")
+    parser.add_argument("-s", "--parttablerestore", action='store_true', dest='parttablerestore',
+                        default=False, help="flash partition table to emmc")
     parser.add_argument("-u", "--unbrick", action='store_true', dest='unbrick', default=False,
                         help="flash stock partitions to the device(flyme 6.2.2.0G, except flyme4 lk)")
     args = parser.parse_args()
@@ -145,17 +152,27 @@ def main():
     dev.find_device()
 
     # Handshake
-    handshake(dev)
+    handshake(dev, args.dumpbootrom or args.unlock)
 
     # Load brom payload
-    load_payload(dev, "../brom-payload/build/payload.bin")
+    load_payload(dev, "../brom-payload/build/payload.bin", args.dumpbootrom)
     dev.kick_watchdog()
 
     # Partition table
-    if args.partitiontable:
-        log("Flashing partition table")
-        switch_user(dev, args.partitiontable)
-        flash_binary(dev, "../bin/gpt_part.bin", 0, 1024 * 0x200)
+    if args.parttablebackup:
+        log("Backuping up partition table")
+        if not os.path.exists("../dumps"):
+            os.mkdir("../dumps")
+        switch_user(dev, args.parttablebackup)
+        dump_binary(dev, "../dumps/gpt_part.bin", 0, 1024 * 0x200)
+
+    # Partition table
+    if args.parttablerestore:
+        log("Restoring partition table")
+        if not os.path.exists("../dumps"):
+            raise RuntimeError("Can't find partition table backup")
+        switch_user(dev, args.parttablerestore)
+        flash_binary(dev, "../dumps/gpt_part.bin", 0, 1024 * 0x200)
 
     # Sanity check GPT
     log("Check GPT")
@@ -163,7 +180,10 @@ def main():
 
     # Parse gpt
     gpt = parse_gpt(dev)
-    log("gpt_parsed = {}".format(gpt))
+    log("== GPT start ==")
+    for partition_name, partition_parameters in gpt.items():
+        log("{} {}".format(partition_name, partition_parameters))
+    log("== GPT end ==")
     if "lk" not in gpt or "tee1" not in gpt or "boot" not in gpt or "recovery" not in gpt:
         raise RuntimeError("bad gpt")
 
@@ -173,25 +193,23 @@ def main():
 
     # Unbrick
     if args.unbrick:
-        log("Flashing preloader")
-        switch_boot0(dev, args.unbrick)
-        flash_binary(dev, "../bin/boot0.img", 0)
-        log("Flashing lk")
-        switch_user(dev)
-        flash_binary(dev, "../bin/uboot.img", gpt["lk"][0], gpt["lk"][1] * 0x200)
-        log("Flashing tee1 and tee2")
-        switch_user(dev)
-        flash_binary(dev, "../bin/mobicore.bin", gpt["tee1"][0], gpt["tee1"][1] * 0x200)
-        flash_binary(dev, "../bin/mobicore.bin", gpt["tee2"][0], gpt["tee2"][1] * 0x200)
-        log("Flashing logo")
-        switch_user(dev)
-        flash_binary(dev, "../bin/logo.img", gpt["logo"][0], gpt["logo"][1] * 0x200)
-        log("Flashing boot")
-        switch_user(dev)
-        flash_binary(dev, "../bin/boot.img", gpt["boot"][0], gpt["boot"][1] * 0x200)
-        log("Flashing recovery")
-        switch_user(dev)
-        flash_binary(dev, "../bin/recovery.img", gpt["recovery"][0], gpt["recovery"][1] * 0x200)
+        dev.kick_watchdog()
+        for partition in eg.multchoicebox("What files do you want to flash?", "Unbrick",
+                                          ["preloader", "lk", "tee", "logo", "boot", "recovery"]):
+            log("Flashing " + partition)
+            if partition != "preloader":
+                switch_user(dev)
+                if partition != "tee":
+                    flash_binary(dev, "../bin/" + partition + ".img", gpt[partition][0],
+                                 gpt[partition][1] * 0x200)
+                else:
+                    flash_binary(dev, "../bin/" + partition + ".img", gpt[partition + "1"][0],
+                                 gpt[partition + "1"][1] * 0x200)
+                    flash_binary(dev, "../bin/" + partition + ".img", gpt[partition + "2"][0],
+                                 gpt[partition + "2"][1] * 0x200)
+            else:
+                switch_boot0(dev, args.unbrick)
+                flash_binary(dev, "../bin/" + partition + ".img", 0)
 
     # Unlock
     if args.unlock:
@@ -211,25 +229,57 @@ def main():
             flash_binary(dev, "../backup/frp_unlocked.img", gpt["frp"][0], gpt["frp"][1] * 0x200)
         log("Flashing lk")
         switch_user(dev)
-        flash_binary(dev, "../bin/uboot.img", gpt["lk"][0], gpt["lk"][1] * 0x200)
-        
+        flash_binary(dev, "../bin/lk.img", gpt["lk"][0], gpt["lk"][1] * 0x200)
+
     # Test R/W
-    if args.testrw:
+    if False:
         switch_user(dev)
         dump_binary(dev, "../boot.img", gpt["boot"][0], gpt["boot"][1] * 0x200)
         flash_binary(dev, "../boot.img", gpt["boot"][0], gpt["boot"][1] * 0x200)
         print(dev.rpmb_read().hex())
+
+    # Backup EMMC
+    if args.backupemmc:
+        if not os.path.exists("../dumps"):
+            os.mkdir("../dumps")
+        dev.kick_watchdog()
+        partitionsToBackup = eg.multchoicebox("What partitons do you want to backup?", "Backup", gpt)
+        log("Backuping up EMMC partitions")
+        switch_user(dev)
+        for partition in gpt:
+            if partition in partitionsToBackup:
+                dump_binary(dev, "../dumps/" + partition + ".img", gpt[partition][0],
+                            gpt[partition][1] * 0x200)
+
+    # Restore EMMC
+    if args.restoreemmc:
+        if not os.path.exists("../dumps"):
+            raise RuntimeError("Can't find EMMC backup")
+        backupedUpPartitions = []
+        for r, d, f in os.walk("../dumps"):
+            for file in f:
+                if '.img' in file:
+                    if os.path.splitext(file)[0] in gpt:
+                        backupedUpPartitions.append(os.path.splitext(file)[0])
+        dev.kick_watchdog()
+        partitionsToRestore = eg.multchoicebox("What partitons do you want to restore?",
+                                               "Restore", backupedUpPartitions)
+        log("Restoring EMMC partitions")
+        switch_user(dev)
+        for partition in partitionsToRestore:
+            flash_binary(dev, "../dumps/" + partition + ".img", gpt[partition][0],
+                         gpt[partition][1] * 0x200)
 
     # Reboot
     if args.unlock:
         thread = UserInputThread()
         thread.start()
         while not thread.done:
-            dev.write32(0x10212008, 0x1971) # low-level watchdog kick
             time.sleep(1)
     log("Reboot")
     dev.reboot()
     if args.unlock:
+        log("Waiting for device to enter fastboot")
         while not b'fastboot' in subprocess.check_output(["fastboot", "devices"]):
             time.sleep(0.5)
         if b'unlocked: yes' in subprocess.run(["fastboot", "getvar", "all"], stderr=subprocess.PIPE).stderr:

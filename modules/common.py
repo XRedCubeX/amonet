@@ -1,19 +1,16 @@
-import struct
-import sys
 import glob
-import time
-
 import serial
 import serial.tools.list_ports
+import struct
+import sys
+import time
 
 from logger import log
 
 BAUD = 115200
 TIMEOUT = 5
 
-
 CRYPTO_BASE = 0x10216000 # for mblu2
-
 
 def serial_ports ():
     """ Lists available serial ports
@@ -45,13 +42,10 @@ def serial_ports ():
 
     return result
 
-
 def p32_be(x):
     return struct.pack(">I", x)
 
-
 class Device:
-
     def __init__(self, port=None):
         self.dev = None
         if port:
@@ -78,7 +72,6 @@ class Device:
             time.sleep(0.25)
 
         log("Found port = {}".format(port))
-
         self.dev = serial.Serial(port, BAUD, timeout=TIMEOUT)
 
     def check(self, test, gold):
@@ -212,7 +205,7 @@ class Device:
         # magic
         self.dev.write(p32_be(0xf00dd00d))
         # cmd
-        self.dev.write(p32_be(0x3000))        
+        self.dev.write(p32_be(0x3000))
 
     def kick_watchdog(self):
         # magic

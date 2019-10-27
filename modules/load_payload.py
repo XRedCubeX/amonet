@@ -1,8 +1,8 @@
+import os
 import struct
 
 from common import CRYPTO_BASE
 from logger import log
-
 
 def init(dev):
     dev.write32(CRYPTO_BASE + 0x0C0C, 0)
@@ -18,47 +18,43 @@ def init(dev):
     dev.write32(CRYPTO_BASE + 0x0C00 + 22 * 4, [0] * 4)
     dev.write32(CRYPTO_BASE + 0x0C00 + 26 * 4, [0] * 8)
 
-
 def hw_acquire(dev):
     dev.write32(CRYPTO_BASE, [0x1F, 0x12000])
-
 
 def call_func(dev, func):
     dev.write32(CRYPTO_BASE + 0x0804, 3)
     dev.write32(CRYPTO_BASE + 0x0808, 3)
     dev.write32(CRYPTO_BASE + 0x0C00, func)
     dev.write32(CRYPTO_BASE + 0x0400, 0)
-    while (not dev.read32(CRYPTO_BASE + 0x0800)):
+    while not dev.read32(CRYPTO_BASE + 0x0800):
         pass
-    if (dev.read32(CRYPTO_BASE + 0x0800) & 2):
-        if ( not (dev.read32(CRYPTO_BASE + 0x0800) & 1) ):
-          while ( not dev.read32(CRYPTO_BASE + 0x0800) ):
-            pass
-        result = -1;
+    if dev.read32(CRYPTO_BASE + 0x0800) & 2:
+        if not dev.read32(CRYPTO_BASE + 0x0800) & 1:
+            while not dev.read32(CRYPTO_BASE + 0x0800):
+                pass
+        result = -1
         dev.write32(CRYPTO_BASE + 0x0804, 3)
     else:
-        while ( not (dev.read32(CRYPTO_BASE + 0x0418) & 1) ):
+        while not dev.read32(CRYPTO_BASE + 0x0418) & 1:
             pass
-        result = 0;
+        result = 0
         dev.write32(CRYPTO_BASE + 0x0804, 3)
     return result
 
-
-#def aes_read16(dev, addr):
-#    dev.write32(CRYPTO_BASE + 0xC04, addr)
-#    dev.write32(CRYPTO_BASE + 0xC08, 0) # dst to invalid pointer
-#    dev.write32(CRYPTO_BASE + 0xC0C, 1)
-#    dev.write32(CRYPTO_BASE + 0xC14, 18)
-#    dev.write32(CRYPTO_BASE + 0xC18, 26)
-#    dev.write32(CRYPTO_BASE + 0xC1C, 26)
-#    if call_func(dev, 126) != 0: # aes decrypt
-#        raise Exception("failed to call the function!")
-#    words = dev.read32(CRYPTO_BASE + 0xC00 + 26 * 4, 4) # read out of the IV
-#    data = b""
-#    for word in words:
-#        data += struct.pack("<I", word)
-#    return data
-
+def aes_read16(dev, addr):
+    dev.write32(CRYPTO_BASE + 0xC04, addr)
+    dev.write32(CRYPTO_BASE + 0xC08, 0) # dst to invalid pointer
+    dev.write32(CRYPTO_BASE + 0xC0C, 1)
+    dev.write32(CRYPTO_BASE + 0xC14, 18)
+    dev.write32(CRYPTO_BASE + 0xC18, 26)
+    dev.write32(CRYPTO_BASE + 0xC1C, 26)
+    if call_func(dev, 126) != 0: # aes decrypt
+        raise Exception("failed to call the function!")
+    words = dev.read32(CRYPTO_BASE + 0xC00 + 26 * 4, 4) # read out of the IV
+    data = b""
+    for word in words:
+        data += struct.pack("<I", word)
+    return data
 
 def aes_write16(dev, addr, data):
     if len(data) != 16:
@@ -89,8 +85,7 @@ def aes_write16(dev, addr, data):
     if call_func(dev, 126) != 0: # aes decrypt
         raise RuntimeError("failed to call the function!")
 
-
-def load_payload(dev, path):
+def load_payload(dev, path, dump_bootrom=False):
     log("Init crypto engine")
     init(dev)
     hw_acquire(dev)
@@ -100,10 +95,13 @@ def load_payload(dev, path):
     log("Disable caches")
     dev.run_ext_cmd(0xB1)
 
-    #log("Dumping bootrom")
-    #with open("../brom.dump", "wb") as dump:
-    #    for x in range(0, 0x20000, 16):
-    #        dump.write((aes_read16(dev, x)))
+    if dump_bootrom:
+        log("Dumping bootrom")
+        if not os.path.exists("../dumps"):
+            os.mkdir("../dumps")
+        with open("../dumps/bootrom.bin", "wb") as dump:
+            for x in range(0, 0x20000, 16):
+                dump.write((aes_read16(dev, x)))
 
     log("Disable bootrom range checks")
     aes_write16(dev, 0x102760, bytes.fromhex("00000000000000000000000080000000"))
@@ -130,7 +128,6 @@ def load_payload(dev, path):
     log("Wait for the payload to come online...")
     dev.wait_payload()
     log("all good")
-
 
 if __name__ == "__main__":
     dev = Device(sys.argv[1])
