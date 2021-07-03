@@ -1,6 +1,7 @@
-# amonet
-This is a MediaTek bootrom exploit for Meizu M2.  
+# Amonet
+This is a MediaTek bootrom exploit for Meizu M5c.  
 Exploit is made by [xyzz](https://github.com/xyzz/amonet).  
+The exploit was originally ported to Meizu M2 by Dinolek.
 
 ## License
 `brom-payload` includes code from Linux kernel, and is therefore licensed under GPLv2.
