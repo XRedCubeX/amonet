@@ -131,8 +131,6 @@ def main():
                         help="backup selected emmc partitions to dumps folder")
     parser.add_argument("-d", "--dumpbootrom", action='store_true', dest='dumpbootrom', default=False,
                         help="dump device bootrom to dumps folder")
-    parser.add_argument("-l", "--unlock", action='store_true', dest='unlock', default=False,
-                        help="patch frp and flash flyme4 lk to allow bootloader unlock")
     parser.add_argument("-m", "--ignoremodem", action='store_true', dest='ignoremodem', default=False,
                         help="ignore ModemManager checking")
     parser.add_argument("-p", "--parttablebackup", action='store_true', dest='parttablebackup',
@@ -152,7 +150,7 @@ def main():
     dev.find_device()
 
     # Handshake
-    handshake(dev, args.dumpbootrom or args.unlock)
+    handshake(dev, args.dumpbootrom)
 
     # Load brom payload
     load_payload(dev, "../brom-payload/build/payload.bin", args.dumpbootrom)
@@ -211,25 +209,6 @@ def main():
                 switch_boot0(dev, args.unbrick)
                 flash_binary(dev, "../bin/" + partition + ".img", 0)
 
-    # Unlock
-    if args.unlock:
-        if not os.path.exists("../backup"):
-            os.mkdir("../backup")
-        log("Dumping frp")
-        switch_user(dev)
-        dump_binary(dev, "../backup/frp_orig.img", gpt["frp"][0], gpt["frp"][1] * 0x200)
-        log("Patching frp")
-        if subprocess.call(["./unlock_bootloader.sh", "../backup/frp_orig.img"]) == 2: # port to python?
-            log("frp is already unlocked")
-        else:
-            if not os.path.exists("../backup/frp_unlocked.img"):
-                raise RuntimeError("Can't find patched frp")
-            log("Flashing patched frp")
-            switch_user(dev)
-            flash_binary(dev, "../backup/frp_unlocked.img", gpt["frp"][0], gpt["frp"][1] * 0x200)
-        log("Flashing lk")
-        switch_user(dev)
-        flash_binary(dev, "../bin/lk.img", gpt["lk"][0], gpt["lk"][1] * 0x200)
 
     # Test R/W
     if False:
@@ -271,26 +250,8 @@ def main():
                          gpt[partition][1] * 0x200)
 
     # Reboot
-    if args.unlock:
-        thread = UserInputThread()
-        thread.start()
-        while not thread.done:
-            time.sleep(1)
     log("Reboot")
     dev.reboot()
-    if args.unlock:
-        log("Waiting for device to enter fastboot")
-        while not b'fastboot' in subprocess.check_output(["fastboot", "devices"]):
-            time.sleep(0.5)
-        if b'unlocked: yes' in subprocess.run(["fastboot", "getvar", "all"], stderr=subprocess.PIPE).stderr:
-            log("Bootloader already unlocked")
-            log("Hold power for 12s to reboot")
-        elif b'unlocked: no' in subprocess.run(["fastboot", "getvar", "all"], stderr=subprocess.PIPE).stderr:
-            log("Click volume up button to unlock")
-            subprocess.call(["fastboot", "oem", "unlock"])
-            log("Hold power for 12s to reboot")
-        else:
-            raise RuntimeError("Can't read getvar all")
 
 if __name__ == "__main__":
     main()
